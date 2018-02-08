@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
-from seq2seq_kv_attn import embedding_kv_attention_seq2seq
+from model.seq2seq_kv_attn import embedding_kv_attention_seq2seq
 
 
 class Seq2SeqKV(object):
@@ -59,7 +59,6 @@ class Seq2SeqKV(object):
         self.tied = tied
         self._build_model()
 
-
     def get_numerical_prediction_tf(self, outputs):
         """
         Return numerical predicted vocab from output/logits
@@ -70,7 +69,6 @@ class Seq2SeqKV(object):
         # batch_size x time_step
         preds = np.argmax(outputs, axis=1)
         return preds
-
 
     def _set_cell_type(self):
         """
@@ -86,16 +84,15 @@ class Seq2SeqKV(object):
             cell = Seq2SeqKV.cell_types[self.cell_type](self.rnn_size)
         # Apply dropout
         if self.dropout_keep_prob < 1.0:
-            print "Applying dropout keep prob of ", self.dropout_keep_prob
+            print("Applying dropout keep prob of ", self.dropout_keep_prob)
             cell = tf.nn.rnn_cell.DropoutWrapper(cell,
-                                    input_keep_prob=self.dropout_keep_prob,
-                                    output_keep_prob=self.dropout_keep_prob)
+                                                 input_keep_prob=self.dropout_keep_prob,
+                                                 output_keep_prob=self.dropout_keep_prob)
         # Handle multilayer case
         if self.num_layers > 1:
             cell = tf.nn.rnn_cell.MultiRNNCell([cell] * self.num_layers)
 
         return cell
-
 
     def _build_inputs(self):
         """
@@ -107,22 +104,22 @@ class Seq2SeqKV(object):
         self.target_weights = []
         self.targets = []
         self.kb_inputs = []
-        for i in xrange(self.encoder_len):
+        for i in range(self.encoder_len):
             if self.use_types:
                 self.encoder_inputs.append(tf.placeholder(tf.int32,
-                                                shape=[None, 2],
-                                                name="encoder{0}".format(i)))
+                                                          shape=[None, 2],
+                                                          name="encoder{0}".format(i)))
             else:
                 self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
-                                                    name="encoder{0}".format(i)))
+                                                          name="encoder{0}".format(i)))
 
-        for i in xrange(self.decoder_len + 1):
+        for i in range(self.decoder_len + 1):
             self.decoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
-                                                    name="decoder{0}".format(i)))
+                                                      name="decoder{0}".format(i)))
             self.target_weights.append(tf.placeholder(tf.float32, shape=[None],
-                                                    name="weight{0}".format(i)))
+                                                      name="weight{0}".format(i)))
             self.targets.append(tf.placeholder(tf.int32, shape=[None],
-                                                    name="target{0}".format(i)))
+                                               name="target{0}".format(i)))
 
         # Can change these dims appropriately based on dataset
         self.kb_inputs = tf.placeholder(tf.int32, shape=[None, 200, 5, 2], name="kb")
@@ -130,7 +127,6 @@ class Seq2SeqKV(object):
                                              name="kb_mask")
         self.seq_lengths = tf.placeholder(tf.int32, shape=[None],
                                           name="seq_lengths")
-
 
     def update_feed_dict(self, feed_dict, encoder_inputs, decoder_inputs,
                          kb_inputs, kb_mask_inputs, targets=None,
@@ -167,7 +163,6 @@ class Seq2SeqKV(object):
         if self.use_bidir and seq_lengths is not None:
             feed_dict[self.seq_lengths] = seq_lengths
 
-
     def _build_model(self):
         """
         Builds a model either for training or testing
@@ -176,39 +171,38 @@ class Seq2SeqKV(object):
         cell = self._set_cell_type()
         self._build_inputs()
         output_projection = None
-        print "Embedding size: ", self.embedding_size
+        print("Embedding size: ", self.embedding_size)
 
         if self.use_attn:
-            print "Using attention over encoder + kb... of type ", \
-                self.attn_type
+            print("Using attention over encoder + kb... of type ", self.attn_type)
             # Also returns attn weights over encoder, kb cols, and kb rows
             self.outputs, self.attn_kb_weights, self.attn_switch_outputs = \
                 embedding_kv_attention_seq2seq(
-              self.encoder_inputs,
-              self.decoder_inputs,
-              self.kb_inputs,
-              self.kb_mask_inputs,
-              cell,
-              num_encoder_symbols=self.vocab_size,
-              num_decoder_symbols=self.vocab_size,
-              embedding_size=self.embedding_size,
-              output_projection=output_projection,
-              feed_previous=self.do_decode,
-              attn_type=self.attn_type,
-              enc_attn=self.enc_attn,
-              use_types=self.use_types,
-              type_to_idx=self.type_to_idx,
-              use_bidir=self.use_bidir,
-              seq_lengths=self.seq_lengths,
-              enc_query=self.enc_query,
-              dtype=tf.float32)
+                    self.encoder_inputs,
+                    self.decoder_inputs,
+                    self.kb_inputs,
+                    self.kb_mask_inputs,
+                    cell,
+                    num_encoder_symbols=self.vocab_size,
+                    num_decoder_symbols=self.vocab_size,
+                    embedding_size=self.embedding_size,
+                    output_projection=output_projection,
+                    feed_previous=self.do_decode,
+                    attn_type=self.attn_type,
+                    enc_attn=self.enc_attn,
+                    use_types=self.use_types,
+                    type_to_idx=self.type_to_idx,
+                    use_bidir=self.use_bidir,
+                    seq_lengths=self.seq_lengths,
+                    enc_query=self.enc_query,
+                    dtype=tf.float32)
 
         # Compute loss -- averaged across batch + with l2 loss added
         trainable_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
         # Only get non-bias terms
         non_bias_vars = [v for v in trainable_vars if "Bias" not in v.name]
         l2_loss = tf.add_n([self.l2_reg * tf.nn.l2_loss(nb) for nb in non_bias_vars])
-        self.total_loss = tf.nn.seq2seq.sequence_loss(self.outputs,
-                                                      self.targets,
-                                                      self.target_weights) \
-                                                      + l2_loss
+        self.total_loss = tf.contrib.legacy_seq2seq.sequence_loss(self.outputs,
+                                                                  self.targets,
+                                                                  self.target_weights) \
+                          + l2_loss

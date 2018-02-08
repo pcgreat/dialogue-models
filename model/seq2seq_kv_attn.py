@@ -1,8 +1,7 @@
 import copy
+
 import numpy as np
 import tensorflow as tf
-
-from custom_rnn_cell import CustomEmbeddingWrapper
 from tensorflow.python import shape
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
@@ -13,6 +12,8 @@ from tensorflow.python.ops import rnn
 from tensorflow.python.ops import rnn_cell
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.util import nest
+
+from model.custom_rnn_cell import CustomEmbeddingWrapper
 from util.tf_utils import batch_linear
 
 """
@@ -21,6 +22,7 @@ Seq2Seq model that also allows softly attending over a KB represented in a key
 """
 
 linear = rnn_cell._linear
+
 
 def _extract_argmax_and_embed(embedding, output_projection=None):
     """Get a loop_function that extracts the previous symbol and embeds it.
@@ -34,6 +36,7 @@ def _extract_argmax_and_embed(embedding, output_projection=None):
     Returns:
     A loop function.
     """
+
     def loop_function(prev, _):
         if output_projection is not None:
             prev = nn_ops.xw_plus_b(
@@ -43,25 +46,26 @@ def _extract_argmax_and_embed(embedding, output_projection=None):
         # embedding_lookup.
         emb_prev = embedding_ops.embedding_lookup(embedding, prev_symbol)
         return emb_prev
+
     return loop_function
 
 
 def kv_attention_decoder(cell,
-                        decoder_inputs,
-                        kb_inputs,
-                        kb_mask_inputs,
-                        initial_state,
-                        attention_states,
-                        num_decoder_symbols,
-                        embedding_size,
-                        output_size,
-                        output_projection=None,
-                        feed_previous=False,
-                        attn_type="linear",
-                        enc_attn=False,
-                        enc_query=False,
-                        scope=None,
-                        dtype=None):
+                         decoder_inputs,
+                         kb_inputs,
+                         kb_mask_inputs,
+                         initial_state,
+                         attention_states,
+                         num_decoder_symbols,
+                         embedding_size,
+                         output_size,
+                         output_projection=None,
+                         feed_previous=False,
+                         attn_type="linear",
+                         enc_attn=False,
+                         enc_query=False,
+                         scope=None,
+                         dtype=None):
     """
     Run decoding which includes an attention over both the encoder states and the KB
     :param cell:
@@ -91,7 +95,7 @@ def kv_attention_decoder(cell,
                                                 [num_decoder_symbols,
                                                  embedding_size])
         loop_function = _extract_argmax_and_embed(
-                embedding, output_projection) if feed_previous else None
+            embedding, output_projection) if feed_previous else None
         emb_inp = [embedding_ops.embedding_lookup(embedding, i) for i in
                    decoder_inputs]
         # Needed for reshaping.
@@ -111,17 +115,17 @@ def kv_attention_decoder(cell,
 
         if attn_type == "linear" or attn_type == "two-mlp":
             k = variable_scope.get_variable("AttnW",
-                                      [1, 1, attn_size, attention_vec_size])
+                                            [1, 1, attn_size, attention_vec_size])
             hidden_features.append(nn_ops.conv2d(hidden, k,
                                                  [1, 1, 1, 1], "SAME"))
             v.append(variable_scope.get_variable("AttnV", [attention_vec_size]))
 
         # Initialize mask embedding table
-        np_mask = np.array([[0.]*embedding_size, [1.] * embedding_size])
+        np_mask = np.array([[0.] * embedding_size, [1.] * embedding_size])
         embedding_mask = variable_scope.get_variable("embedding_mask",
-                            [2, embedding_size],
-                            initializer=tf.constant_initializer(np_mask),
-                            trainable=False)
+                                                     [2, embedding_size],
+                                                     initializer=tf.constant_initializer(np_mask),
+                                                     trainable=False)
         embedded_kb_mask_batch = tf.nn.embedding_lookup(embedding_mask,
                                                         kb_mask_inputs)
         # Mask for zeroing out attns over PAD tokens
@@ -140,6 +144,7 @@ def kv_attention_decoder(cell,
 
         # Dim: (?, num_triples,)
         value_idx = kb_inputs[:, :, 3, 0]
+
         # Query will usually be of (batch_size, rnn_size)
         def attention(query):
             """Put attention masks on hidden using hidden_features and query."""
@@ -149,7 +154,7 @@ def kv_attention_decoder(cell,
             attn_masks = []
             # Store attention logits
             attn_logits = []
-             # If the query is a tuple (LSTMStateTuple), flatten it.
+            # If the query is a tuple (LSTMStateTuple), flatten it.
             if nest.is_sequence(query):
                 query_list = nest.flatten(query)
                 # Check that ndims == 2 if specified.
@@ -157,7 +162,7 @@ def kv_attention_decoder(cell,
                     ndims = q.get_shape().ndims
                     if ndims:
                         assert ndims == 2
-                query = array_ops.concat(1, query_list)
+                query = array_ops.concat(query_list, axis=1)
             with variable_scope.variable_scope("Attention"):
                 if attn_type == "linear":
                     y = linear(query, attention_vec_size, True)
@@ -170,7 +175,7 @@ def kv_attention_decoder(cell,
                         1, attn_length, 1])
                     query = batch_linear(query, attn_size, bias=True)
                     hid = tf.squeeze(hidden, [2])
-                    s = tf.reduce_sum(tf.mul(query, hid), [2])
+                    s = tf.reduce_sum(tf.matmul(query, hid), [2])
                 else:
                     # Two layer MLP
                     y = linear(query, attention_vec_size, True)
@@ -178,7 +183,7 @@ def kv_attention_decoder(cell,
                     # Attention mask is a softmax of v^T * tanh(...).
                     layer1 = math_ops.tanh(hidden_features[0] + y)
                     k2 = variable_scope.get_variable("AttnW_1",
-                                          [1, 1, attn_size, attention_vec_size])
+                                                     [1, 1, attn_size, attention_vec_size])
                     layer2 = nn_ops.conv2d(layer1, k2, [1, 1, 1, 1], "SAME")
                     s = math_ops.reduce_sum(
                         v[0] * math_ops.tanh(layer2), [2, 3])
@@ -189,11 +194,10 @@ def kv_attention_decoder(cell,
                 # Now calculate the attention-weighted vector d.
                 # Hidden is encoder hidden states
                 d = math_ops.reduce_sum(
-                  array_ops.reshape(a, [-1, attn_length, 1, 1]) * hidden,
-                  [1, 2])
+                    array_ops.reshape(a, [-1, attn_length, 1, 1]) * hidden,
+                    [1, 2])
                 ds.append(array_ops.reshape(d, [-1, attn_size]))
             return ds, attn_masks, attn_logits
-
 
         def attention_kb_triple(query):
             """
@@ -251,13 +255,13 @@ def kv_attention_decoder(cell,
         switch_outputs = []
         attn_kb_outputs = []
         prev = None
-        batch_attn_size = array_ops.pack([batch_size, attn_size])
+        batch_attn_size = array_ops.stack([batch_size, attn_size])
         attns = [array_ops.zeros(batch_attn_size, dtype=dtype)]
         first_indices = tf.tile(tf.expand_dims(tf.range(batch_size), dim=1),
-                        [1, num_triples])
+                                [1, num_triples])
         # Use encoding of query
         if enc_query:
-            encoder_q = array_ops.concat(1, [state.c, state.h])
+            encoder_q = array_ops.concat([state.c, state.h], axis=1)
             attn_kb, attn_kb_logits = attention_kb_triple(encoder_q)
         # Ensure the second shape of attention vectors is set.
         for a in attns:
@@ -293,7 +297,7 @@ def kv_attention_decoder(cell,
                     ndims = q.get_shape().ndims
                     if ndims:
                         assert ndims == 2
-                concat_state = array_ops.concat(1, query_list)
+                concat_state = array_ops.concat(query_list, axis=1)
 
             if enc_attn:
                 attns, attn_masks, attn_logits = attention(state)
@@ -303,7 +307,7 @@ def kv_attention_decoder(cell,
 
             attn_kb_logits = attn_kb_logits * kb_attn_mask
             # Gather values from KB
-            gather_indices = tf.pack([first_indices, value_idx], axis=2)
+            gather_indices = tf.stack([first_indices, value_idx], axis=2)
             updated_p = tf.scatter_nd(gather_indices, attn_kb_logits,
                                       [batch_size, num_decoder_symbols])
             attn_kb_outputs.append(attn_kb_logits)
@@ -323,24 +327,24 @@ def kv_attention_decoder(cell,
 
 
 def embedding_kv_attention_seq2seq(encoder_inputs,
-                                decoder_inputs,
-                                kb_inputs,
-                                kb_mask_inputs,
-                                cell,
-                                num_encoder_symbols,
-                                num_decoder_symbols,
-                                embedding_size,
-                                output_projection=None,
-                                feed_previous=False,
-                                attn_type="linear",
-                                enc_attn=False,
-                                use_types=False,
-                                type_to_idx=None,
-                                use_bidir=False,
-                                seq_lengths=None,
-                                enc_query=False,
-                                dtype=None,
-                                scope=None):
+                                   decoder_inputs,
+                                   kb_inputs,
+                                   kb_mask_inputs,
+                                   cell,
+                                   num_encoder_symbols,
+                                   num_decoder_symbols,
+                                   embedding_size,
+                                   output_projection=None,
+                                   feed_previous=False,
+                                   attn_type="linear",
+                                   enc_attn=False,
+                                   use_types=False,
+                                   type_to_idx=None,
+                                   use_bidir=False,
+                                   seq_lengths=None,
+                                   enc_query=False,
+                                   dtype=None,
+                                   scope=None):
     """Embedding sequence-to-sequence model with attention over a KB.
 
     This model first embeds encoder_inputs by a newly created embedding
@@ -394,31 +398,33 @@ def embedding_kv_attention_seq2seq(encoder_inputs,
             entity_encoding[idx, idx] = 1.
 
     with variable_scope.variable_scope(
-        scope or "embedding_kb_attention_seq2seq", dtype=dtype) as scope:
+                    scope or "embedding_kb_attention_seq2seq", dtype=dtype) as scope:
         dtype = scope.dtype
         # Encoder.
         if use_types:
-            print "Typed Encoder Inputs..."
+            print("Typed Encoder Inputs...")
+
             # Augment encoder inputs
             encoder_cell = CustomEmbeddingWrapper(
                 cell, embedding_classes=num_encoder_symbols,
                 embedding_size=embedding_size, entity_encoding=entity_encoding)
         else:
-            print "Regular encoding..."
+            print("Regular encoding...")
+
             # Just regular encoding
-            encoder_cell = rnn_cell.EmbeddingWrapper(
+            encoder_cell = tf.contrib.rnn.EmbeddingWrapper(
                 cell, embedding_classes=num_encoder_symbols,
                 embedding_size=embedding_size)
 
         # Use bidirectional encoding
         if use_bidir:
             encoder_cell_backward = copy.deepcopy(encoder_cell)
-            encoder_outputs, encoder_state_fw, encoder_state_bw =\
-                rnn.bidirectional_rnn(encoder_cell, encoder_cell_backward,
-                                      encoder_inputs, dtype=dtype,
-                                      sequence_length=seq_lengths)
-            combined_c = tf.concat(1, [encoder_state_fw.c, encoder_state_bw.c])
-            combined_h = tf.concat(1, [encoder_state_fw.h, encoder_state_bw.h])
+            encoder_outputs, encoder_state_fw, encoder_state_bw = \
+                tf.nn.bidirectional_dynamic_rnn(encoder_cell, encoder_cell_backward,
+                                                encoder_inputs, dtype=dtype,
+                                                sequence_length=seq_lengths)
+            combined_c = tf.concat([encoder_state_fw.c, encoder_state_bw.c], axis=1)
+            combined_h = tf.concat([encoder_state_fw.h, encoder_state_bw.h], axis=1)
             encoder_state = rnn_cell.LSTMStateTuple(c=combined_c, h=combined_h)
         else:
             encoder_outputs, encoder_state = rnn.rnn(
@@ -428,35 +434,35 @@ def embedding_kv_attention_seq2seq(encoder_inputs,
         # to put attention on.
         if use_bidir:
             top_states = [array_ops.reshape(e, [-1, 1, 2 * cell.output_size])
-                      for e in encoder_outputs]
+                          for e in encoder_outputs]
         else:
             top_states = [array_ops.reshape(e, [-1, 1, cell.output_size])
-                      for e in encoder_outputs]
+                          for e in encoder_outputs]
 
-        attention_states = array_ops.concat(1, top_states)
+        attention_states = array_ops.concat(top_states, axis=1)
         if output_projection is None:
             if use_bidir:
                 # Modify dimension of decoder rnn_size
                 cell = rnn_cell.BasicLSTMCell(2 * cell.output_size,
                                               state_is_tuple=True)
-            cell = rnn_cell.OutputProjectionWrapper(cell, num_decoder_symbols)
+            cell = tf.contrib.rnn.OutputProjectionWrapper(cell, num_decoder_symbols)
             output_size = num_decoder_symbols
         else:
             output_size = cell.output_size
 
         if isinstance(feed_previous, bool):
             return kv_attention_decoder(
-                            cell,
-                            decoder_inputs,
-                            kb_inputs,
-                            kb_mask_inputs,
-                            encoder_state,
-                            attention_states,
-                            num_decoder_symbols,
-                            embedding_size=embedding_size,
-                            output_size=output_size,
-                            feed_previous=feed_previous,
-                            attn_type=attn_type,
-                            enc_attn=enc_attn,
-                            enc_query=enc_query,
-                            dtype=dtype)
+                cell,
+                decoder_inputs,
+                kb_inputs,
+                kb_mask_inputs,
+                encoder_state,
+                attention_states,
+                num_decoder_symbols,
+                embedding_size=embedding_size,
+                output_size=output_size,
+                feed_previous=feed_previous,
+                attn_type=attn_type,
+                enc_attn=enc_attn,
+                enc_query=enc_query,
+                dtype=dtype)

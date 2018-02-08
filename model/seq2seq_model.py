@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
-from custom_seq2seq import embedding_attention_seq2seq
+from model.custom_seq2seq import embedding_attention_seq2seq
 
 
 class Seq2Seq(object):
@@ -75,7 +75,7 @@ class Seq2Seq(object):
 
         # Apply dropout
         if self.dropout_keep_prob < 1.0:
-            print "Applying dropout keep prob of ", self.dropout_keep_prob
+            print("Applying dropout keep prob of ", self.dropout_keep_prob)
             cell = tf.nn.rnn_cell.DropoutWrapper(cell,
                                                  input_keep_prob=self.dropout_keep_prob,
                                                  output_keep_prob=self.dropout_keep_prob)
@@ -96,17 +96,16 @@ class Seq2Seq(object):
         self.decoder_inputs = []
         self.target_weights = []
         self.targets = []
-        for i in xrange(self.encoder_len):
-          self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
-                                                    name="encoder{0}".format(i)))
-        for i in xrange(self.decoder_len + 1):
+        for i in range(self.encoder_len):
+            self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
+                                                      name="encoder{0}".format(i)))
+        for i in range(self.decoder_len + 1):
             self.decoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
-                                                    name="decoder{0}".format(i)))
+                                                      name="decoder{0}".format(i)))
             self.target_weights.append(tf.placeholder(tf.float32, shape=[None],
-                                                    name="weight{0}".format(i)))
+                                                      name="weight{0}".format(i)))
             self.targets.append(tf.placeholder(tf.int32, shape=[None],
-                                                    name="target{0}".format(i)))
-
+                                               name="target{0}".format(i)))
 
     def update_feed_dict(self, feed_dict, encoder_inputs, decoder_inputs, targets=None, target_weights=None):
         """
@@ -137,37 +136,37 @@ class Seq2Seq(object):
         cell = self._set_cell_type()
         self._build_inputs()
         output_projection = None
-        print "Embedding size: ", self.embedding_size
+        print("Embedding size: ", self.embedding_size)
 
         if self.use_attn:
             if self.copy:
-                print "Using attention of form ", self.attn_type, " with copy mechanism..."
+                print("Using attention of form ", self.attn_type, " with copy mechanism...")
             else:
-                print "Using attention of form ", self.attn_type
+                print("Using attention of form ", self.attn_type)
             self.outputs, self.states, self.attn_outputs = embedding_attention_seq2seq(
-              self.encoder_inputs,
-              self.decoder_inputs,
-              cell,
-              num_encoder_symbols=self.vocab_size,
-              num_decoder_symbols=self.vocab_size,
-              embedding_size=self.embedding_size,
-              output_projection=output_projection,
-              feed_previous=self.do_decode,
-              dtype=tf.float32,
-              copy=self.copy,
-              attn_type=self.attn_type)
+                self.encoder_inputs,
+                self.decoder_inputs,
+                cell,
+                num_encoder_symbols=self.vocab_size,
+                num_decoder_symbols=self.vocab_size,
+                embedding_size=self.embedding_size,
+                output_projection=output_projection,
+                feed_previous=self.do_decode,
+                dtype=tf.float32,
+                copy=self.copy,
+                attn_type=self.attn_type)
         else:
-            print "Using vanilla seq2seq..."
-            self.outputs, self.state = tf.nn.seq2seq.embedding_rnn_seq2seq(
-              self.encoder_inputs,
-              self.decoder_inputs,
-              cell,
-              num_encoder_symbols=self.vocab_size,
-              num_decoder_symbols=self.vocab_size,
-              embedding_size=self.embedding_size,
-              output_projection=output_projection,
-              feed_previous=self.do_decode,
-              dtype=tf.float32)
+            print("Using vanilla seq2seq...")
+            self.outputs, self.state = tf.contrib.legacy_seq2seq.embedding_rnn_seq2seq(
+                self.encoder_inputs,
+                self.decoder_inputs,
+                cell,
+                num_encoder_symbols=self.vocab_size,
+                num_decoder_symbols=self.vocab_size,
+                embedding_size=self.embedding_size,
+                output_projection=output_projection,
+                feed_previous=self.do_decode,
+                dtype=tf.float32)
             self.attn_outputs = None
 
         # Compute loss -- averaged across batch + with l2 loss added
@@ -177,4 +176,5 @@ class Seq2Seq(object):
         l2_loss = tf.add_n([self.l2_reg * tf.nn.l2_loss(nb) for nb in non_bias_vars])
 
         # Compute loss -- averaged across batch
-        self.total_loss = tf.nn.seq2seq.sequence_loss(self.outputs, self.targets, self.target_weights) + l2_loss
+        self.total_loss = tf.contrib.legacy_seq2seq.sequence_loss(self.outputs, self.targets,
+                                                                  self.target_weights) + l2_loss
